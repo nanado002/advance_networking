@@ -18,6 +18,16 @@ output "strongswan_public_ip" {
   value       = module.vpn.strongswan_public_ip
 }
 
+output "app_server_private_ip" {
+  description = "Private IP of the app server"
+  value       = aws_instance.app_server.private_ip
+}
+
+output "transit_gateway_id" {
+  description = "ID of the Transit Gateway"
+  value       = module.tgw.tgw_id
+}
+
 output "vpn_connection_id" {
   description = "ID of the VPN connection"
   value       = module.vpn.vpn_connection_id

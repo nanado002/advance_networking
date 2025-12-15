@@ -189,3 +189,27 @@ resource "aws_vpn_connection" "this" {
   tunnel1_preshared_key = var.vpn_preshared_key_1
   tunnel2_preshared_key = var.vpn_preshared_key_2
 }
+
+# Configure StrongSwan with VPN details after creation
+resource "null_resource" "configure_strongswan" {
+  depends_on = [aws_vpn_connection.this]
+  
+  provisioner "local-exec" {
+    command = <<-EOF
+      aws ssm send-command \
+        --instance-ids ${aws_instance.strongswan.id} \
+        --document-name "AWS-RunShellScript" \
+        --parameters 'commands=[
+          "cat > /etc/strongswan/ipsec.secrets <<SECRETS",
+          "${aws_vpn_connection.this.tunnel1_address} : PSK \"${var.vpn_preshared_key_1}\"",
+          "${aws_vpn_connection.this.tunnel2_address} : PSK \"${var.vpn_preshared_key_2}\"",
+          "SECRETS",
+          "systemctl restart strongswan"
+        ]'
+    EOF
+  }
+  
+  triggers = {
+    vpn_connection_id = aws_vpn_connection.this.id
+  }
+}

@@ -118,6 +118,17 @@ resource "aws_ec2_transit_gateway_route_table_propagation" "onprem" {
   transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.core.id
 }
 
+# VPN attachment to TGW and route propagation
+resource "aws_ec2_transit_gateway_route_table_association" "vpn" {
+  transit_gateway_attachment_id  = module.vpn.vpn_attachment_id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.core.id
+}
+
+resource "aws_ec2_transit_gateway_route_table_propagation" "vpn" {
+  transit_gateway_attachment_id  = module.vpn.vpn_attachment_id
+  transit_gateway_route_table_id = aws_ec2_transit_gateway_route_table.core.id
+}
+
 # Add routes in each VPC route table to point to TGW for other CIDRs
 # Shared VPC routes
 resource "aws_route" "shared_to_app_via_tgw" {
@@ -316,6 +327,7 @@ resource "aws_security_group" "test_instance" {
 }
 
 # --- VPC Endpoints (for SSM without NAT) ---
+# Shared VPC Endpoints
 resource "aws_vpc_endpoint" "ssm" {
   vpc_id              = module.shared_vpc.vpc_id
   service_name        = "com.amazonaws.${var.region}.ssm"
@@ -324,7 +336,19 @@ resource "aws_vpc_endpoint" "ssm" {
   security_group_ids  = [aws_security_group.vpc_endpoint.id]
   private_dns_enabled = true
   
-  tags = merge(local.tags, { Name = "${var.project}-ssm-endpoint" })
+  tags = merge(local.tags, { Name = "${var.project}-shared-ssm-endpoint" })
+}
+
+# App VPC Endpoints
+resource "aws_vpc_endpoint" "app_ssm" {
+  vpc_id              = module.app_vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ssm"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.app_vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.app_vpc_endpoint.id]
+  private_dns_enabled = true
+  
+  tags = merge(local.tags, { Name = "${var.project}-app-ssm-endpoint" })
 }
 
 resource "aws_vpc_endpoint" "ssm_messages" {
@@ -335,7 +359,7 @@ resource "aws_vpc_endpoint" "ssm_messages" {
   security_group_ids  = [aws_security_group.vpc_endpoint.id]
   private_dns_enabled = true
   
-  tags = merge(local.tags, { Name = "${var.project}-ssm-messages-endpoint" })
+  tags = merge(local.tags, { Name = "${var.project}-shared-ssm-messages-endpoint" })
 }
 
 resource "aws_vpc_endpoint" "ec2_messages" {
@@ -346,7 +370,29 @@ resource "aws_vpc_endpoint" "ec2_messages" {
   security_group_ids  = [aws_security_group.vpc_endpoint.id]
   private_dns_enabled = true
   
-  tags = merge(local.tags, { Name = "${var.project}-ec2-messages-endpoint" })
+  tags = merge(local.tags, { Name = "${var.project}-shared-ec2-messages-endpoint" })
+}
+
+resource "aws_vpc_endpoint" "app_ssm_messages" {
+  vpc_id              = module.app_vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ssmmessages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.app_vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.app_vpc_endpoint.id]
+  private_dns_enabled = true
+  
+  tags = merge(local.tags, { Name = "${var.project}-app-ssm-messages-endpoint" })
+}
+
+resource "aws_vpc_endpoint" "app_ec2_messages" {
+  vpc_id              = module.app_vpc.vpc_id
+  service_name        = "com.amazonaws.${var.region}.ec2messages"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = module.app_vpc.private_subnet_ids
+  security_group_ids  = [aws_security_group.app_vpc_endpoint.id]
+  private_dns_enabled = true
+  
+  tags = merge(local.tags, { Name = "${var.project}-app-ec2-messages-endpoint" })
 }
 
 # S3 Gateway Endpoint (FREE)
@@ -356,13 +402,22 @@ resource "aws_vpc_endpoint" "s3" {
   vpc_endpoint_type = "Gateway"
   route_table_ids   = [module.shared_vpc.private_route_table_id]
   
-  tags = merge(local.tags, { Name = "${var.project}-s3-endpoint" })
+  tags = merge(local.tags, { Name = "${var.project}-shared-s3-endpoint" })
+}
+
+resource "aws_vpc_endpoint" "app_s3" {
+  vpc_id            = module.app_vpc.vpc_id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [module.app_vpc.private_route_table_id]
+  
+  tags = merge(local.tags, { Name = "${var.project}-app-s3-endpoint" })
 }
 
 # Security Group for VPC Endpoints
 resource "aws_security_group" "vpc_endpoint" {
-  name        = "${var.project}-vpc-endpoint-sg"
-  description = "Security group for VPC endpoints"
+  name        = "${var.project}-shared-vpc-endpoint-sg"
+  description = "Security group for shared VPC endpoints"
   vpc_id      = module.shared_vpc.vpc_id
 
   ingress {
@@ -380,7 +435,30 @@ resource "aws_security_group" "vpc_endpoint" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.tags, { Name = "${var.project}-vpc-endpoint-sg" })
+  tags = merge(local.tags, { Name = "${var.project}-shared-vpc-endpoint-sg" })
+}
+
+resource "aws_security_group" "app_vpc_endpoint" {
+  name        = "${var.project}-app-vpc-endpoint-sg"
+  description = "Security group for app VPC endpoints"
+  vpc_id      = module.app_vpc.vpc_id
+
+  ingress {
+    description = "HTTPS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [var.app_cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, { Name = "${var.project}-app-vpc-endpoint-sg" })
 }
 
 # --- Observability Module ---
